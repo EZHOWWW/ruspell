@@ -33,7 +33,7 @@ class SpellChecker:
         self,
         vocabulary: Iterable[str] = (),
         *,
-        weights_dir: Path | None = None,
+        weights_dir: str | Path | None = None,
     ) -> None:
         """Собирает проверку.
 
@@ -45,7 +45,7 @@ class SpellChecker:
                 умолчанию — ``$RUSPELL_WEIGHTS_DIR``, иначе ``~/.cache/ruspell``.
                 Весов нет — работает один словарный слой.
         """
-        self._weights_dir = weights_dir or default_weights_dir()
+        self._weights_dir = Path(weights_dir) if weights_dir else default_weights_dir()
         self._layers = build_layers(
             vocabulary_words(vocabulary),
             self._weights_dir,

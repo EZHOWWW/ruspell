@@ -40,13 +40,13 @@ def vocabulary_words(phrases: Iterable[str]) -> frozenset[str]:
     )
 
 
-def load_vocabulary(path: Path) -> frozenset[str]:
+def load_vocabulary(path: str | Path) -> frozenset[str]:
     """Читает доменный словарь из JSON-файла со списком строк.
 
     Строки — слова или фразы, разбираются так же, как в ``vocabulary_words``.
 
     Args:
-        path: Путь к JSON-файлу со списком строк.
+        path: Путь к JSON-файлу со списком строк; строка или ``Path``.
 
     Returns:
         Слова словаря в нижнем регистре.
@@ -54,7 +54,7 @@ def load_vocabulary(path: Path) -> frozenset[str]:
     Raises:
         ValueError: Если в файле не список строк.
     """
-    content: object = json.loads(path.read_text(encoding="utf-8"))
+    content: object = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(content, list) or not all(isinstance(item, str) for item in content):
         raise ValueError(f"Ожидался список строк в {path}")
     return vocabulary_words(item for item in content if isinstance(item, str))

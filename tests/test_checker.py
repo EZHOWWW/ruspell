@@ -78,6 +78,9 @@ class TestLayers:
     def test_weights_dir_is_visible(self, tmp_path):
         assert SpellChecker(weights_dir=tmp_path).weights_dir == tmp_path
 
+    def test_weights_dir_accepts_a_plain_string(self, tmp_path):
+        assert SpellChecker(weights_dir=str(tmp_path)).weights_dir == tmp_path
+
     def test_without_weights_only_the_dictionary_layer(self, tmp_path):
         assert SpellChecker(weights_dir=tmp_path / "absent").layers == ("dictionary",)
 

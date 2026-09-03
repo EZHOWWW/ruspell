@@ -40,6 +40,11 @@ class TestLoadVocabulary:
         path.write_text(json.dumps(["ФТП", "Фондтехпроект"]), encoding="utf-8")
         assert load_vocabulary(path) == frozenset({"фтп", "фондтехпроект"})
 
+    def test_accepts_a_plain_string_path(self, tmp_path):
+        path = tmp_path / "vocabulary.json"
+        path.write_text(json.dumps(["ФТП"]), encoding="utf-8")
+        assert load_vocabulary(str(path)) == frozenset({"фтп"})
+
     def test_rejects_anything_but_a_list_of_strings(self, tmp_path):
         path = tmp_path / "vocabulary.json"
         path.write_text(json.dumps({"слова": ["фтп"]}), encoding="utf-8")
