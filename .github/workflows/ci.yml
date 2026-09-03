@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv run --python 3.12 ruff check .
+      - run: uv run --python 3.12 ruff format --check .
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      # Веса (58 МБ) в CI не качаются: юнит-тесты от них не зависят, а
+      # интеграционные проверки согласования сами пропускаются без весов.
+      - run: uv run --python ${{ matrix.python-version }} pytest -q
+
+  degradation:
+    # Пакеты слоя согласования установлены, весов нет: проверка обязана молча
+    # деградировать до словарного слоя, а не падать. Это обещано в README, и
+    # обещание проверяется.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: |
+          uv run --python 3.12 --extra agreement python - <<'PY'
+          from pathlib import Path
+
+          from ruspell import SpellChecker
+
+          checker = SpellChecker(weights_dir=Path("/nonexistent"))
+          assert checker.layers == ("dictionary",), checker.layers
+          assert checker.check("Направляем предложния.")[0].word == "предложния"
+          print("деградация до словарного слоя работает")
+          PY
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv build
+      - run: uv run --python 3.12 --with dist/*.whl --no-project python -c "import ruspell; print(ruspell.SpellChecker().layers)"

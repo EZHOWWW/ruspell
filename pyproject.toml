@@ -1,0 +1,106 @@
+[project]
+name = "ruspell"
+version = "0.1.0"
+description = "Проверка орфографии и согласования русского текста: словарь + синтаксическое согласование"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Dmitriy Ezhov" }]
+keywords = ["russian", "spellcheck", "grammar", "agreement", "nlp", "pymorphy3", "slovnet"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Russian",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Linguistic",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pymorphy3>=2.0.2",
+    "pymorphy3-dicts-ru>=2.4.417150.4580142",
+]
+
+[project.optional-dependencies]
+# Слой согласования: разбор морфологии и синтаксиса на numpy — без torch и без
+# JVM. Веса (~30 МБ) качаются отдельно, см. `ruspell-weights download`.
+agreement = [
+    "slovnet>=0.6.0",
+    "navec>=0.10.0",
+    "razdel>=0.5.0",
+]
+
+[project.scripts]
+ruspell-weights = "ruspell.weights:main"
+
+[project.urls]
+Homepage = "https://github.com/EZHOWWW/ruspell"
+Source = "https://github.com/EZHOWWW/ruspell"
+Issues = "https://github.com/EZHOWWW/ruspell/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.9.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ruspell"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "examples", "README.md", "LICENSE", "AGENTS.md", "CLAUDE.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+# Markdown ruff тоже форматирует, а в документации примеры неполные (обёртки
+# без импортов, выровненные комментарии) — они пишутся для читателя, не для
+# компилятора.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "RUF", # ruff-specific
+    "ANN", # flake8-annotations
+]
+ignore = [
+    "ANN401", # Any — контролируется стайлгайдом вручную
+    "ANN204", # __init__ не требует аннотации return
+    "RUF001", # кирилличные строки — ложные срабатывания
+    "RUF002", # кирилличные docstring — ложные срабатывания
+    "RUF003", # кирилличные комментарии — ложные срабатывания
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "S101"]
+"examples/**" = ["T201"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ruspell"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint.flake8-annotations]
+suppress-none-returning = true
