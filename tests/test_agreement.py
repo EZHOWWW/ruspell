@@ -7,10 +7,18 @@ slovnet, а сами правила и склонение вариантов о�
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from dataclasses import dataclass
+from importlib.util import find_spec
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from ruspell import agreement
 from ruspell.agreement import (
     Word,
+    build_layer,
     find_disagreements,
     find_government_errors,
     inflect,
@@ -22,6 +30,11 @@ from ruspell.dictionary import get_morph_analyzer
 FEMININE_SINGULAR = {"Case": "Nom", "Number": "Sing", "Gender": "Fem"}
 PLURAL = {"Case": "Nom", "Number": "Plur"}
 MASCULINE_GENITIVE = {"Case": "Gen", "Number": "Sing", "Gender": "Masc"}
+
+needs_razdel = pytest.mark.skipif(
+    find_spec("razdel") is None,
+    reason="нет экстры ruspell[agreement]: `uv sync --extra agreement`",
+)
 
 
 def analyzer():
@@ -64,6 +77,17 @@ class TestFindDisagreements:
         assert [(issue.word, issue.category) for issue in issues] == [("Указанная", "AGREEMENT")]
         assert "Указанные" in issues[0].suggestions
         assert "работы" in issues[0].message
+
+    def test_features_are_named_in_russian(self):
+        # Сообщение читает человек: «по признакам: Number» — это нотация UD,
+        # утёкшая в интерфейс.
+        words = [
+            Word("Указанная", 0, 9, FEMININE_SINGULAR, 1, "amod"),
+            Word("работы", 10, 16, PLURAL, -1, "root"),
+        ]
+        message = next(find_disagreements(words, analyzer())).message
+        assert "число" in message
+        assert "Number" not in message
 
     def test_agreeing_definition_is_not_reported(self):
         words = [
@@ -137,12 +161,44 @@ class TestParseSentence:
         assert parse_sentence("", fake_tokenize, FakeMorph(), FakeSyntax()) == []
 
 
-def fake_tokenize(text: str):
+@needs_razdel
+class TestBuildLayer:
+    """Слой не имеет права ронять проверку — ни на сборке, ни на разборе.
+
+    Сборка слоя — единственное здесь, что требует razdel: правила проверяются
+    на разобранных вручную предложениях и от экстры не зависят.
+    """
+
+    def test_broken_parse_degrades_to_no_issues(self, monkeypatch, caplog):
+        def explode(*args, **kwargs):
+            raise ValueError("слои модели разъехались")
+
+        monkeypatch.setattr(agreement, "load_models", lambda directory: (FakeMorph(), FakeSyntax()))
+        monkeypatch.setattr(agreement, "parse_sentence", explode)
+        detect = build_layer(analyzer(), Path("/nonexistent"))
+        assert detect("Указанная работы выполнены") == []
+        assert "Разбор строки не удался" in caplog.text
+
+    def test_missing_weights_are_reported_on_build(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="Не найдены веса"):
+            build_layer(analyzer(), tmp_path)
+
+
+@dataclass
+class FakeSpan:
+    """Токен с позицией — то же, что отдаёт razdel."""
+
+    text: str
+    start: int
+    stop: int
+
+
+def fake_tokenize(text: str) -> Iterator[FakeSpan]:
     """Токенизатор без razdel: делит по пробелам, считая позиции."""
     position = 0
     for chunk in text.split(" "):
         if chunk:
-            yield SimpleNamespace(text=chunk, start=position, stop=position + len(chunk))
+            yield FakeSpan(text=chunk, start=position, stop=position + len(chunk))
         position += len(chunk) + 1
 
 

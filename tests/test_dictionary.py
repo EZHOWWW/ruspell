@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from ruspell.dictionary import (
+    MIN_FREQUENCY_ENTRIES,
     build_layer,
     edits1,
     frequency_ranker,
@@ -39,10 +42,20 @@ class TestRankSuggestions:
         assert rank_suggestions("плона", set()) == []
 
 
+def write_dictionary(path: Path, *lines: str) -> Path:
+    """Пишет частотный словарь: значимые строки плюс наполнитель до порога.
+
+    Ранжирование отказывается работать по неправдоподобно короткому файлу, так
+    что фикстура обязана выглядеть как словарь, а не как обрывок.
+    """
+    filler = [f"слово{number} 1" for number in range(MIN_FREQUENCY_ENTRIES)]
+    path.write_text("\n".join([*lines, *filler]) + "\n", encoding="utf-8")
+    return path
+
+
 class TestFrequencyRanker:
     def test_prefers_the_common_word(self, tmp_path):
-        path = tmp_path / "ru_full.txt"
-        path.write_text("предложения 5000\nпредложная 3\n", encoding="utf-8")
+        path = write_dictionary(tmp_path / "ru_full.txt", "предложения 5000", "предложная 3")
         rank = frequency_ranker(path)
         assert rank is not None
         assert rank("предложния", {"предложная", "предложения"}) == ["предложения", "предложная"]
@@ -50,9 +63,22 @@ class TestFrequencyRanker:
     def test_missing_file_gives_no_ranker(self, tmp_path):
         assert frequency_ranker(tmp_path / "absent.txt") is None
 
-    def test_broken_lines_are_skipped(self, tmp_path):
+    def test_implausibly_short_file_gives_no_ranker(self, tmp_path, caplog):
+        # Оборванная закачка непуста и читается: без порога ранжирование стало
+        # бы алфавитным — молча и хуже документированного отката.
         path = tmp_path / "ru_full.txt"
-        path.write_text("предложения 5000\nмусор\n\nплан x\n", encoding="utf-8")
+        path.write_text("предложения 5000\n", encoding="utf-8")
+        assert frequency_ranker(path) is None
+        assert "оборванную закачку" in caplog.text
+
+    def test_broken_lines_are_skipped(self, tmp_path):
+        path = write_dictionary(
+            tmp_path / "ru_full.txt",
+            "предложения 5000",
+            "мусор",
+            "",
+            "план x",
+        )
         rank = frequency_ranker(path)
         assert rank is not None
         assert rank("плана", {"план", "предложения"}) == ["предложения", "план"]

@@ -33,6 +33,17 @@ class TestVocabularyWords:
     def test_empty_input_gives_empty_vocabulary(self):
         assert vocabulary_words([]) == frozenset()
 
+    def test_hyphenated_term_becomes_its_parts(self):
+        # Так же режется и текст, поэтому «машино-мест» в письме совпадёт со
+        # словарём по обеим половинам — отдельного разбора дефиса не нужно.
+        assert vocabulary_words(["машино-мест"]) == frozenset({"машино", "мест"})
+
+    def test_a_bare_string_is_rejected(self):
+        # Строка — тоже Iterable[str], и без проверки словарь молча стал бы
+        # набором отдельных букв.
+        with pytest.raises(TypeError, match="коллекция строк"):
+            vocabulary_words("оквэд")
+
 
 class TestLoadVocabulary:
     def test_reads_list_of_strings(self, tmp_path):
@@ -56,11 +67,8 @@ class TestInVocabulary:
     def test_known_word_is_domain(self):
         assert in_vocabulary("Фондтехпроект", frozenset({"фондтехпроект"}))
 
-    def test_hyphenated_word_is_known_by_parts(self):
-        assert in_vocabulary("имущественно-земельных", frozenset({"имущественно", "земельных"}))
-
-    def test_half_known_hyphenated_word_is_not_domain(self):
-        assert not in_vocabulary("имущественно-земельных", frozenset({"имущественно"}))
+    def test_word_is_matched_case_insensitively(self):
+        assert in_vocabulary("  ОКВЭД  ", frozenset({"оквэд"}))
 
     def test_unknown_word_is_not_domain(self):
         assert not in_vocabulary("предложния", frozenset({"техрегламент"}))

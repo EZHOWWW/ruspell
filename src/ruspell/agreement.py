@@ -24,6 +24,7 @@ slovnet даёт разбор морфологии и синтаксиса на 
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable, Iterator
 from functools import lru_cache
 from pathlib import Path
@@ -35,7 +36,16 @@ from ruspell.issues import MAX_SUGGESTIONS, Detector
 from ruspell.models import Issue
 from ruspell.weights import MORPH_FILE, NAVEC_FILE, SYNTAX_FILE, missing_weights
 
+logger = logging.getLogger("ruspell")
+
 AGREEING_FEATURES = ("Case", "Number", "Gender")
+
+FEATURE_NAMES = {"Case": "падеж", "Number": "число", "Gender": "род"}
+"""Названия признаков для сообщения пользователю.
+
+Сообщение читает человек, а не разработчик: «по признакам: Number» в русском
+тексте — это утечка нотации UD наружу.
+"""
 
 PREPOSITIONS_BY_CASE: dict[str, str] = {
     "Gen": (
@@ -195,13 +205,20 @@ def inflect(word: str, feats: dict[str, str], analyzer: MorphAnalyzer) -> list[s
     Returns:
         Варианты замены, не совпадающие с исходным словом.
     """
+    # Род берётся только у единственного числа: во множественном его нет, и
+    # разметка ставит его как придётся.
+    gender = (
+        PYMORPHY_GENDERS.get(feats.get("Gender", "")) if feats.get("Number") == "Sing" else None
+    )
     grammemes = {
-        PYMORPHY_CASES.get(feats.get("Case", "")),
-        PYMORPHY_NUMBERS.get(feats.get("Number", "")),
+        grammeme
+        for grammeme in (
+            PYMORPHY_CASES.get(feats.get("Case", "")),
+            PYMORPHY_NUMBERS.get(feats.get("Number", "")),
+            gender,
+        )
+        if grammeme is not None
     }
-    if feats.get("Number") == "Sing":
-        grammemes.add(PYMORPHY_GENDERS.get(feats.get("Gender", "")))
-    grammemes.discard(None)
     if not grammemes:
         return []
     original = word.lower()
@@ -242,7 +259,10 @@ def find_disagreements(words: list[Word], analyzer: MorphAnalyzer) -> Iterator[I
             end=word.end,
             category="AGREEMENT",
             suggestions=tuple(suggestions),
-            message=f"Не согласовано с «{head.text}» по признакам: {', '.join(mismatched)}",
+            message=(
+                f"Не согласовано с «{head.text}» по признакам: "
+                + ", ".join(FEATURE_NAMES[feature] for feature in mismatched)
+            ),
         )
 
 
@@ -291,7 +311,15 @@ def build_layer(analyzer: MorphAnalyzer, weights_dir: Path) -> Detector:
     morph, syntax = load_models(weights_dir)
 
     def detect(text: str) -> list[Issue]:
-        words = parse_sentence(text, tokenize, morph, syntax)
+        try:
+            words = parse_sentence(text, tokenize, morph, syntax)
+        except Exception as exc:
+            # Ловится всё намеренно, ровно по той же причине, что и на сборке
+            # слоя в ``check.build_layers``: разбор — это чужая модель на чужих
+            # весах, и её отказ на одной строке не должен превращать проверку
+            # всего текста в исключение. Строку разберёт словарный слой.
+            logger.warning("Разбор строки не удался (%s) — она проверена только словарём", exc)
+            return []
         issues = [
             *find_disagreements(words, analyzer),
             *find_government_errors(words, analyzer),

@@ -3,12 +3,16 @@
 В пакете весов нет — 58 МБ в колесе не нужны никому, кто пользуется только
 словарным слоем. Скачиваются они один раз, командой::
 
-    ruspell-weights download [каталог]
+    ruspell-weights download [каталог]             # всё, 58 МБ
+    ruspell-weights download-agreement [каталог]   # без частотного словаря, 30 МБ
     python -m ruspell download [каталог]
 
 Каталог по умолчанию — ``$RUSPELL_WEIGHTS_DIR``, иначе ``~/.cache/ruspell``.
 Скачивание переживает временные отказы сети: за файлами ходят в публичные
 хранилища, а те периодически отдают 503.
+
+Частотный словарь берётся из запиннного коммита, а не из ``master``: ветка —
+подвижная ссылка, и ранжирование поехало бы без следа в истории.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ import shutil
 import sys
 import time
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 ENV_WEIGHTS_DIR = "RUSPELL_WEIGHTS_DIR"
@@ -33,6 +37,13 @@ FREQUENCY_FILE = "ru_full.txt"
 AGREEMENT_FILES = (NAVEC_FILE, MORPH_FILE, SYNTAX_FILE)
 """Веса, без которых слой согласования не поднимется."""
 
+FREQUENCY_COMMIT = "f8a65e6ddc17e0baa2e366a909986798d8dbe55b"
+"""Коммит FrequencyWords, из которого берётся частотный словарь.
+
+Ветка ``master`` — подвижная ссылка: содержимое под ней меняется и исчезает, а
+проверка получила бы другое ранжирование без единого следа в истории.
+"""
+
 DOWNLOADS: dict[str, str] = {
     # Эмбеддинги и модели разбора проекта Natasha (MIT), ~30 МБ вместе.
     NAVEC_FILE: f"https://storage.yandexcloud.net/natasha-navec/packs/{NAVEC_FILE}",
@@ -42,8 +53,8 @@ DOWNLOADS: dict[str, str] = {
     # Нужен только для ранжирования вариантов замены: без него работает
     # эвристика по форме слова.
     FREQUENCY_FILE: (
-        "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/ru/"
-        f"{FREQUENCY_FILE}"
+        f"https://raw.githubusercontent.com/hermitdave/FrequencyWords/{FREQUENCY_COMMIT}"
+        f"/content/2018/ru/{FREQUENCY_FILE}"
     ),
 }
 
@@ -104,14 +115,24 @@ def download(url: str, path: Path) -> None:
         return
 
 
-def download_weights(directory: Path) -> int:
-    """Докачивает недостающие ресурсы и возвращает их суммарный размер в МБ.
+def download_files(directory: Path, sources: Mapping[str, str]) -> int:
+    """Докачивает недостающее и возвращает суммарный размер файлов в МБ.
 
     Уже скачанные файлы не трогаются, так что команду можно запускать повторно.
+    Битый архив весов ловится там, где он мешает — при загрузке моделей, и
+    ``check.build_layers`` откатывается на словарный слой; битый частотный
+    словарь — в ``dictionary.frequency_ranker``.
+
+    Args:
+        directory: Куда складывать.
+        sources: Имена файлов и адреса, откуда их брать.
+
+    Returns:
+        Суммарный размер файлов в мегабайтах.
     """
     directory.mkdir(parents=True, exist_ok=True)
     total = 0
-    for name, url in DOWNLOADS.items():
+    for name, url in sources.items():
         path = directory / name
         if path.exists() and path.stat().st_size > 0:
             print(f"уже на месте: {name}")
@@ -122,13 +143,42 @@ def download_weights(directory: Path) -> int:
     return total // (1024 * 1024)
 
 
+def download_weights(directory: Path) -> int:
+    """Докачивает всё: веса согласования и частотный словарь (58 МБ).
+
+    Команду можно запускать повторно: целые файлы не перекачиваются.
+    """
+    return download_files(directory, DOWNLOADS)
+
+
+def download_agreement_weights(directory: Path) -> int:
+    """Докачивает только веса согласования, без частотного словаря (30 МБ).
+
+    Частотный словарь — половина объёма и нужен лишь для ранжирования
+    вариантов; без него слой согласования работает полностью, а словарный
+    откатывается на эвристику по форме слова.
+    """
+    return download_files(directory, {name: DOWNLOADS[name] for name in AGREEMENT_FILES})
+
+
+COMMANDS: dict[str, Callable[[Path], int]] = {
+    "download": download_weights,
+    "download-agreement": download_agreement_weights,
+}
+"""Команды консольного скрипта."""
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Точка входа команды скачивания весов."""
     parser = argparse.ArgumentParser(
         prog="ruspell-weights",
         description="Скачивание весов slovnet и частотного словаря для ruspell",
     )
-    parser.add_argument("command", choices=("download",), help="что сделать")
+    parser.add_argument(
+        "command",
+        choices=tuple(COMMANDS),
+        help="download — всё; download-agreement — без частотного словаря",
+    )
     parser.add_argument(
         "directory",
         nargs="?",
@@ -138,7 +188,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     directory = arguments.directory or default_weights_dir()
-    size = download_weights(directory)
+    size = COMMANDS[arguments.command](directory)
     print(f"веса ruspell в {directory}: {size} МБ")
     return 0
 

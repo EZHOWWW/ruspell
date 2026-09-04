@@ -14,7 +14,7 @@ from ruspell.issues import (
     near_initials,
     shift,
 )
-from ruspell.models import Issue
+from ruspell.models import Issue, IssueCategory
 
 KNOWN = frozenset({"плана", "предложения", "приложения", "работа", "работ", "документ"})
 
@@ -27,7 +27,7 @@ def suggest(word: str) -> list[str]:
     return {"предложния": ["предложения"], "работв": ["работа", "работ"]}.get(word, [])
 
 
-def issue(word, start, end, *suggestions, category="SPELL") -> Issue:
+def issue(word, start, end, *suggestions, category: IssueCategory = "SPELL") -> Issue:
     return Issue(
         word=word,
         start=start,

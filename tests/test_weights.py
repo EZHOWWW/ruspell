@@ -10,6 +10,8 @@ import pytest
 
 from ruspell import weights
 
+SOURCES = {"file.tar": "https://example.invalid/file.tar"}
+
 
 class TestDefaultWeightsDir:
     def test_environment_variable_wins(self, monkeypatch, tmp_path):
@@ -62,28 +64,74 @@ class TestDownload:
             weights.download("https://example.invalid/file.tar", tmp_path / "file.tar")
 
 
-class TestDownloadWeights:
-    def test_existing_files_are_not_downloaded_again(self, monkeypatch, tmp_path):
+class TestDownloadFiles:
+    def test_existing_file_is_not_downloaded_again(self, monkeypatch, tmp_path):
         downloaded = []
-        monkeypatch.setattr(weights, "DOWNLOADS", {"file.tar": "https://example.invalid/file.tar"})
         monkeypatch.setattr(weights, "download", lambda url, path: downloaded.append(url))
         (tmp_path / "file.tar").write_bytes(b"tar")
-        assert weights.download_weights(tmp_path) == 0
+        assert weights.download_files(tmp_path, SOURCES) == 0
         assert downloaded == []
 
     def test_missing_file_is_downloaded(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(weights, "DOWNLOADS", {"file.tar": "https://example.invalid/file.tar"})
         monkeypatch.setattr(weights, "download", lambda url, path: path.write_bytes(b"tar" * 1024))
-        weights.download_weights(tmp_path / "new")
+        weights.download_files(tmp_path / "new", SOURCES)
         assert (tmp_path / "new" / "file.tar").exists()
+
+    def test_empty_file_is_downloaded_again(self, monkeypatch, tmp_path):
+        downloaded = []
+
+        def restore(url, path):
+            downloaded.append(url)
+            path.write_bytes(b"tar")
+
+        monkeypatch.setattr(weights, "download", restore)
+        (tmp_path / "file.tar").write_bytes(b"")
+        weights.download_files(tmp_path, SOURCES)
+        assert downloaded == list(SOURCES.values())
+
+
+class TestDownloadCommands:
+    def test_full_download_takes_the_frequency_dictionary_too(self, monkeypatch, tmp_path):
+        asked = []
+        monkeypatch.setattr(
+            weights,
+            "download_files",
+            lambda directory, sources: asked.append(
+                tuple(sources),
+            ),
+        )
+        weights.download_weights(tmp_path)
+        assert weights.FREQUENCY_FILE in asked[0]
+
+    def test_agreement_download_skips_the_frequency_dictionary(self, monkeypatch, tmp_path):
+        asked = []
+        monkeypatch.setattr(
+            weights,
+            "download_files",
+            lambda directory, sources: asked.append(
+                tuple(sources),
+            ),
+        )
+        weights.download_agreement_weights(tmp_path)
+        assert asked == [weights.AGREEMENT_FILES]
 
 
 class TestMain:
     def test_download_command_uses_the_given_directory(self, monkeypatch, tmp_path):
         used = []
-        monkeypatch.setattr(weights, "download_weights", lambda directory: used.append(directory))
+        monkeypatch.setitem(weights.COMMANDS, "download", lambda directory: used.append(directory))
         assert weights.main(["download", str(tmp_path)]) == 0
         assert used == [tmp_path]
+
+    def test_agreement_command_is_available(self, monkeypatch, tmp_path):
+        called = []
+        monkeypatch.setitem(
+            weights.COMMANDS,
+            "download-agreement",
+            lambda directory: called.append(directory),
+        )
+        assert weights.main(["download-agreement", str(tmp_path)]) == 0
+        assert called == [tmp_path]
 
     def test_unknown_command_is_rejected(self):
         with pytest.raises(SystemExit):

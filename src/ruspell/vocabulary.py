@@ -34,7 +34,18 @@ def vocabulary_words(phrases: Iterable[str]) -> frozenset[str]:
 
     Returns:
         Слова этих фраз в нижнем регистре.
+
+    Raises:
+        TypeError: Если передана одна строка вместо коллекции строк.
     """
+    if isinstance(phrases, str):
+        # Строка — тоже Iterable[str], и без этой проверки она разбирается
+        # посимвольно: словарь молча оказывается набором отдельных букв, все
+        # короче MIN_LENGTH, то есть пустым. Молчаливо пустой словарь — худший
+        # из возможных ответов: проверка шумит ровно на том, что ей передали.
+        raise TypeError(
+            f'Ожидалась коллекция строк, а не одна строка {phrases!r}: передайте ["{phrases}"]',
+        )
     return frozenset(
         match.group().lower() for phrase in phrases for match in WORD_RE.finditer(phrase)
     )
@@ -57,14 +68,16 @@ def load_vocabulary(path: str | Path) -> frozenset[str]:
     content: object = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(content, list) or not all(isinstance(item, str) for item in content):
         raise ValueError(f"Ожидался список строк в {path}")
-    return vocabulary_words(item for item in content if isinstance(item, str))
+    return vocabulary_words(content)
 
 
 def in_vocabulary(word: str, vocabulary: frozenset[str]) -> bool:
-    """Проверяет, что слово знакомо домену — целиком или по частям.
+    """Проверяет, что слово знакомо домену.
 
-    Составные термины вроде «имущественно-земельных» проверяются по частям:
-    целиком они редки, а обе половины частотны.
+    Составные термины отдельного разбора не требуют: и текст, и словарь режутся
+    одним и тем же ``WORD_RE``, а он дефис словом не считает. «машино-мест» с
+    обеих сторон распадается на «машино» и «мест», и слово из словаря совпадает
+    со словом из текста само собой.
 
     Args:
         word: Проверяемое слово.
@@ -73,13 +86,7 @@ def in_vocabulary(word: str, vocabulary: frozenset[str]) -> bool:
     Returns:
         ``True``, если слово следует считать корректным.
     """
-    lowered = word.strip().lower()
-    if not lowered:
-        return False
-    if lowered in vocabulary:
-        return True
-    parts = [part for part in lowered.split("-") if part]
-    return len(parts) > 1 and all(part in vocabulary for part in parts)
+    return word.strip().lower() in vocabulary
 
 
 def drop_vocabulary_words(
