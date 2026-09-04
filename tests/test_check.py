@@ -9,10 +9,10 @@ from __future__ import annotations
 from ruspell.check import build_layers, check_text
 from ruspell.dictionary import get_morph_analyzer
 from ruspell.issues import WORD_RE, Detector
-from ruspell.models import Issue
+from ruspell.models import Issue, IssueCategory
 
 
-def layer_for(word: str, replacement: str, category="SPELL") -> Detector:
+def layer_for(word: str, replacement: str, category: IssueCategory = "SPELL") -> Detector:
     """Слой, флагующий каждое вхождение *word* в строке."""
 
     def detect(text: str) -> list[Issue]:

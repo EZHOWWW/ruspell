@@ -29,7 +29,7 @@ class TestIssue:
 
     def test_issue_is_frozen(self):
         with pytest.raises(dataclasses.FrozenInstanceError):
-            issue().word = "другое"
+            setattr(issue(), "word", "другое")
 
     def test_issues_with_the_same_fields_are_equal(self):
         assert issue() == issue()
