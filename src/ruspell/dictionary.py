@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
@@ -23,6 +24,18 @@ from pymorphy3 import MorphAnalyzer
 from ruspell.issues import Detector, find_dictionary_issues
 from ruspell.models import Issue
 from ruspell.vocabulary import drop_vocabulary_words
+
+logger = logging.getLogger("ruspell")
+
+MIN_FREQUENCY_ENTRIES = 1000
+"""Ниже этого порога файл — не частотный словарь.
+
+Оборванная закачка непуста и прекрасно читается, поэтому `exists()` её не
+отличает: разбор даёт горстку строк, и ранжирование молча становится
+алфавитным — хуже документированного отката на эвристику и, в отличие от него,
+без единого следа. Настоящий словарь — полтора миллиона строк, так что порог
+различает их с огромным запасом.
+"""
 
 RUSSIAN_ALPHABET = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
 """Алфавит для порождения вариантов замены.
@@ -88,8 +101,8 @@ def frequency_ranker(path: Path) -> Ranker | None:
         path: Путь к частотному словарю.
 
     Returns:
-        Ранжирование или ``None``, если файла нет — тогда вызывающий берёт
-        ``rank_suggestions``.
+        Ранжирование или ``None``, если файла нет или он не похож на словарь —
+        тогда вызывающий берёт ``rank_suggestions``.
     """
     if not path.exists():
         return None
@@ -98,6 +111,14 @@ def frequency_ranker(path: Path) -> Ranker | None:
         word, _, count = line.partition(" ")
         if word and count.isdigit():
             frequencies[word] = int(count)
+    if len(frequencies) < MIN_FREQUENCY_ENTRIES:
+        logger.warning(
+            "Частотный словарь %s разобран в %d строк — похоже на оборванную закачку; "
+            "варианты ранжируются эвристикой по форме слова",
+            path,
+            len(frequencies),
+        )
+        return None
 
     def rank(word: str, candidates: set[str]) -> list[str]:
         return sorted(candidates, key=lambda candidate: (-frequencies.get(candidate, 0), candidate))

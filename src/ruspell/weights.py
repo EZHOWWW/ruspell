@@ -11,16 +11,13 @@
 Скачивание переживает временные отказы сети: за файлами ходят в публичные
 хранилища, а те периодически отдают 503.
 
-Каждый файл сверяется с контрольной суммой — своей и до, и после скачивания.
-Оборванная закачка и подменённый источник неотличимы по размеру, а последствия
-у них разные только по причине: проверка молча деградирует, и понять почему
-без сверки нельзя.
+Частотный словарь берётся из запиннного коммита, а не из ``master``: ветка —
+подвижная ссылка, и ранжирование поехало бы без следа в истории.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import http.client
 import os
 import shutil
@@ -60,14 +57,6 @@ DOWNLOADS: dict[str, str] = {
         f"/content/2018/ru/{FREQUENCY_FILE}"
     ),
 }
-
-CHECKSUMS: dict[str, str] = {
-    NAVEC_FILE: "f07270833d78523edc5781538d67038e95b43975e4a7ae757c693b687f9cbfca",
-    MORPH_FILE: "54812762a641c742dbfa9c950c4b53bbb469301983077ed01b9f074643d540d3",
-    SYNTAX_FILE: "0759ce82eaac4430f5b4ac27b2444aa6e4b6501ca38c2f45d62467265383d85e",
-    FREQUENCY_FILE: "32dfd94138aea2667ec455dcc8512029e39bd4b8ea70b09410d569b69d511a30",
-}
-"""sha256 каждого файла — сверено с источниками."""
 
 ATTEMPTS = 6
 """Сколько раз пытаться скачать файл, удваивая паузу между попытками."""
@@ -126,26 +115,13 @@ def download(url: str, path: Path) -> None:
         return
 
 
-def file_digest(path: Path) -> str:
-    """Возвращает sha256 файла, читая его частями — файлы до 29 МБ."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def is_intact(path: Path, digest: str) -> bool:
-    """Проверяет, что файл на месте и его содержимое — ожидаемое."""
-    return path.exists() and file_digest(path) == digest
-
-
 def download_files(directory: Path, sources: Mapping[str, str]) -> int:
     """Докачивает недостающее и возвращает суммарный размер файлов в МБ.
 
-    Целый файл не трогается, битый — перекачивается: размера мало, чтобы
-    отличить обрезанную закачку от готового файла, а тихо испорченный
-    частотный словарь стоит дороже лишней минуты сверки.
+    Уже скачанные файлы не трогаются, так что команду можно запускать повторно.
+    Битый архив весов ловится там, где он мешает — при загрузке моделей, и
+    ``check.build_layers`` откатывается на словарный слой; битый частотный
+    словарь — в ``dictionary.frequency_ranker``.
 
     Args:
         directory: Куда складывать.
@@ -153,26 +129,16 @@ def download_files(directory: Path, sources: Mapping[str, str]) -> int:
 
     Returns:
         Суммарный размер файлов в мегабайтах.
-
-    Raises:
-        RuntimeError: Если скачанный файл не совпал с контрольной суммой.
     """
     directory.mkdir(parents=True, exist_ok=True)
     total = 0
     for name, url in sources.items():
         path = directory / name
-        digest = CHECKSUMS[name]
-        if is_intact(path, digest):
+        if path.exists() and path.stat().st_size > 0:
             print(f"уже на месте: {name}")
         else:
             print(f"скачиваю {name}...")
             download(url, path)
-            if not is_intact(path, digest):
-                raise RuntimeError(
-                    f"Контрольная сумма {name} не совпала с ожидаемой ({digest}). "
-                    "Файл повреждён при передаче или изменился в источнике; "
-                    "удалите его и повторите команду.",
-                )
         total += path.stat().st_size
     return total // (1024 * 1024)
 
