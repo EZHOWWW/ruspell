@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,6 +30,11 @@ from ruspell.dictionary import get_morph_analyzer
 FEMININE_SINGULAR = {"Case": "Nom", "Number": "Sing", "Gender": "Fem"}
 PLURAL = {"Case": "Nom", "Number": "Plur"}
 MASCULINE_GENITIVE = {"Case": "Gen", "Number": "Sing", "Gender": "Masc"}
+
+needs_razdel = pytest.mark.skipif(
+    find_spec("razdel") is None,
+    reason="нет экстры ruspell[agreement]: `uv sync --extra agreement`",
+)
 
 
 def analyzer():
@@ -155,8 +161,13 @@ class TestParseSentence:
         assert parse_sentence("", fake_tokenize, FakeMorph(), FakeSyntax()) == []
 
 
+@needs_razdel
 class TestBuildLayer:
-    """Слой не имеет права ронять проверку — ни на сборке, ни на разборе."""
+    """Слой не имеет права ронять проверку — ни на сборке, ни на разборе.
+
+    Сборка слоя — единственное здесь, что требует razdel: правила проверяются
+    на разобранных вручную предложениях и от экстры не зависят.
+    """
 
     def test_broken_parse_degrades_to_no_issues(self, monkeypatch, caplog):
         def explode(*args, **kwargs):
