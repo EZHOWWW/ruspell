@@ -47,7 +47,7 @@ examples/           vocabulary.json (вымышленный), quickstart.py, bui
 ## Команды
 
 ```bash
-uv sync --extra agreement          # окружение
+uv sync                            # окружение со слоем согласования
 uv run pytest -q                   # тесты (проверки согласования скипаются без весов)
 uv run ruff check .                # линтер
 uv run ruff format --check .       # форматтер
@@ -146,7 +146,7 @@ SpellChecker(vocabulary=load_vocabulary(Path("vocabulary.json")))     # из ф�
    uv run python -c "from pathlib import Path; from ruspell.weights import missing_weights, default_weights_dir; print(default_weights_dir(), missing_weights(default_weights_dir()))"
    ```
 2. Пустой список, но слой не поднялся → не установлена экстра:
-   `uv sync --extra agreement`.
+   `uv sync`.
 3. Файлы есть, но слой падает на `tarfile.ReadError` → архив оборван. Удали
    файл и скачай заново: `ruspell-weights download` докачивает недостающее.
 4. Сети нет или прокси режет: скачай файлы вручную по адресам из
