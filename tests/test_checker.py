@@ -46,14 +46,15 @@ class TestCheck:
         assert [issue.start for issue in issues] == sorted(issue.start for issue in issues)
 
     def test_vocabulary_word_is_not_reported(self):
-        text = "Выделено 120 машино-мест."
-        assert SpellChecker().check(text)[0].word == "машино"
-        assert SpellChecker(vocabulary=["машино-мест"]).check(text) == []
+        text = "Требуется госэкспертиза проекта."
+        assert SpellChecker().check(text)[0].word == "госэкспертиза"
+        assert SpellChecker(vocabulary=["госэкспертиза"]).check(text) == []
 
     def test_vocabulary_from_file(self, tmp_path):
         path = tmp_path / "vocabulary.json"
-        path.write_text('["машино-мест"]', encoding="utf-8")
-        assert SpellChecker(vocabulary=load_vocabulary(path)).check("120 машино-мест") == []
+        path.write_text('["госэкспертиза"]', encoding="utf-8")
+        checker = SpellChecker(vocabulary=load_vocabulary(path))
+        assert checker.check("Требуется госэкспертиза.") == []
 
     def test_result_is_a_list_of_issues(self, checker):
         assert all(isinstance(issue, Issue) for issue in checker.check("Направляем предложния."))
@@ -111,3 +112,23 @@ class TestAgreement:
 
     def test_correct_sentence_is_left_alone(self, checker):
         assert checker.check("Указанные работы выполнены согласно приказу.") == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Срок составляет два рабочих дня.",
+            "Ответ будет направлен через 2 года.",
+            "Средства федерального и областного бюджетов выделены.",
+            "Выполнены строительно-монтажные работы.",
+            "Подготовлено технико-экономическое обоснование.",
+        ],
+    )
+    def test_correct_constructions_are_left_alone(self, checker, text):
+        # Каждая фраза раньше давала ложное замечание, а correct портил текст.
+        assert checker.check(text) == []
+
+    def test_paragraph_on_one_line_is_checked_sentence_by_sentence(self, checker):
+        text = "Работы выполнены в срок. Указанная работы выполнены согласно приказа."
+        issues = checker.check(text)
+        assert [issue.word for issue in issues] == ["Указанная", "приказа"]
+        assert all(text[issue.start : issue.end] == issue.word for issue in issues)

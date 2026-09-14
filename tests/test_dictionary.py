@@ -71,6 +71,27 @@ class TestFrequencyRanker:
         assert frequency_ranker(path) is None
         assert "оборванную закачку" in caplog.text
 
+    def test_undecodable_file_gives_no_ranker(self, tmp_path, caplog):
+        # Обрыв посреди многобайтного символа: без перехвата SpellChecker падал
+        # на сборке, хотя словарь нужен только для ранжирования.
+        path = tmp_path / "ru_full.txt"
+        path.write_bytes("предложения 5000\nплан".encode()[:-1])
+        assert frequency_ranker(path) is None
+        assert "не прочитан" in caplog.text
+
+    def test_directory_instead_of_file_gives_no_ranker(self, tmp_path):
+        path = tmp_path / "ru_full.txt"
+        path.mkdir()
+        assert frequency_ranker(path) is None
+
+    def test_rare_word_still_beats_an_absent_one(self, tmp_path):
+        # Деловая лексика в словаре субтитров редкая: «изложенного» встречено
+        # один раз. Отбрось редкие слова — и вариант выбирался бы по алфавиту.
+        path = write_dictionary(tmp_path / "ru_full.txt", "изложенного 1")
+        rank = frequency_ranker(path)
+        assert rank is not None
+        assert rank("изооженного", {"извоженного", "изложенного"})[0] == "изложенного"
+
     def test_broken_lines_are_skipped(self, tmp_path):
         path = write_dictionary(
             tmp_path / "ru_full.txt",
@@ -97,10 +118,23 @@ class TestBuildLayer:
 
     def test_vocabulary_word_is_not_reported(self):
         analyzer = get_morph_analyzer()
-        text = "Выделено 120 машино-мест."
-        assert detect_words(text, analyzer) == ["машино"]
-        detect = build_layer(vocabulary_words(["машино-мест"]), analyzer, rank_suggestions)
+        text = "Требуется госэкспертиза проекта."
+        assert detect_words(text, analyzer) == ["госэкспертиза"]
+        detect = build_layer(vocabulary_words(["госэкспертиза"]), analyzer, rank_suggestions)
         assert detect(text) == []
+
+    def test_inflected_form_of_a_vocabulary_word_is_not_reported(self):
+        # В словаре одна форма термина. Если бы слова словаря шли в варианты
+        # замены, «техрегламента» в одной правке от «техрегламент» стало бы
+        # опечаткой, а correct испортил бы правильный текст.
+        detect = build_layer(
+            vocabulary_words(["техрегламент"]), get_morph_analyzer(), rank_suggestions
+        )
+        assert detect("Согласно требованиям техрегламента.") == []
+
+    def test_hyphenated_compound_is_not_reported(self):
+        text = "Подготовлено технико-экономическое обоснование."
+        assert detect_words(text, get_morph_analyzer()) == []
 
 
 def detect_words(text: str, analyzer) -> list[str]:

@@ -20,14 +20,15 @@ src/ruspell/
 │                   vocabulary_words, load_vocabulary, default_weights_dir
 ├── checker.py      класс SpellChecker: check() и correct()
 ├── check.py        build_layers() — сборка слоёв; check_text() — обход текста по строкам
-├── issues.py       ЧИСТАЯ логика: WORD_RE, find_dictionary_issues, near_initials,
-│                   merge_issues, collapse_repeats, apply_issues, shift
-├── vocabulary.py   ЧИСТАЯ логика словаря: vocabulary_words, load_vocabulary,
-│                   in_vocabulary, drop_vocabulary_words
+├── issues.py       ЧИСТАЯ логика: WORD_RE, normalize_word, find_dictionary_issues,
+│                   near_initials, merge_issues, collapse_repeats, apply_issues, shift
+├── vocabulary.py   ЧИСТАЯ логика словаря: vocabulary_words, load_vocabulary
 ├── dictionary.py   словарный слой: get_morph_analyzer, edits1, rank_suggestions,
-│                   frequency_ranker, build_layer
-├── agreement.py    слой согласования: load_models, parse_sentence, inflect,
-│                   find_disagreements, find_government_errors, build_layer
+│                   frequency_ranker, build_layer (словарь пользователя — в is_known,
+│                   но не в вариантах замены)
+├── agreement.py    слой согласования: load_models, parse_sentence, inflect, near,
+│                   can_agree, can_take, find_disagreements, find_government_errors,
+│                   build_layer (режет строку на предложения razdel)
 ├── models.py       контракт: Issue (frozen dataclass), IssueDict, IssueCategory
 ├── weights.py      имена и адреса весов, default_weights_dir, missing_weights,
 │                   download_weights, main() — CLI `ruspell-weights download`
@@ -76,8 +77,10 @@ SpellChecker(vocabulary=load_vocabulary(Path("vocabulary.json")))     # из ф�
 
 1. Нашёл слово, которое подчёркивается зря → добавь его в словарь **проекта
    пользователя** (его JSON, его справочник в БД), а не в репозиторий ruspell.
-2. Составные слова кладутся как есть: `"машино-мест"` разбирается на «машино» и
-   «мест», и `in_vocabulary` признаёт слово по частям.
+2. Составные слова кладутся как есть. Первая часть слова через дефис
+   («машино-», «технико-») не проверяется вовсе, вторая — обычное слово. В
+   варианты замены слова словаря не идут и не должны: склонённая форма термина
+   в одной правке от словарной подчёркивалась бы как опечатка.
 3. Аббревиатуру пиши вместе с расшифровкой одной строкой — из неё возьмутся все
    слова.
 4. **ФИО в словарь не кладём никогда.** За фамилии отвечает `near_initials`:
@@ -100,15 +103,19 @@ SpellChecker(vocabulary=load_vocabulary(Path("vocabulary.json")))     # из ф�
 ## Встроить библиотеку в чужой проект
 
 1. `uv add "ruspell[agreement]"` (или без экстры, если согласование не нужно).
-2. Один `SpellChecker` на процесс, собранный на старте: сборка ~2 с, проверка
-   ~10 мс. Кэшируй фабрику (`@lru_cache(maxsize=1)`), не создавай экземпляр в
-   обработчике запроса.
+2. Один `SpellChecker` на процесс, собранный на старте: сборка ~1.7 с и ~400 МБ,
+   проверка ~3 мс на предложение. Кэшируй фабрику (`@lru_cache(maxsize=1)`), не
+   создавай экземпляр в обработчике запроса.
 3. Веса: `ruspell-weights download` на этапе сборки образа (не при старте
    контейнера — прод может быть без сети) и `RUSPELL_WEIGHTS_DIR` в окружении.
-4. Наружу отдавай `issue.as_dict()`, а не сам `Issue`.
-5. Слои покажи в health-check: `checker.layers`. Если в проде там только
+4. `OPENBLAS_NUM_THREADS=1` в окружении сервиса. Без него один поток проверки
+   будит все ядра и работает медленнее. Масштабирование — процессами. В пул
+   процессов экземпляр не передаётся (не сериализуется): собирай его в
+   `initializer` воркера.
+5. Наружу отдавай `issue.as_dict()`, а не сам `Issue`.
+6. Слои покажи в health-check: `checker.layers`. Если в проде там только
    `('dictionary',)` — веса не доехали.
-6. Ничего из FastAPI/Django в ruspell не добавляй: обёртка живёт в проекте
+7. Ничего из FastAPI/Django в ruspell не добавляй: обёртка живёт в проекте
    пользователя. Пример обёртки — в README, раздел «Встраивание».
 
 ## Добавить новое правило согласования
@@ -122,7 +129,10 @@ SpellChecker(vocabulary=load_vocabulary(Path("vocabulary.json")))     # из ф�
    MorphAnalyzer) -> Iterator[Issue]`. Никакого IO, никаких моделей внутри.
 2. Опирайся на `word.relation` (дуга синтаксического дерева) и `word.feats`
    (признаки UD). Вершина — `words[word.head]`, но сначала проверь
-   `0 <= word.head < len(words)`.
+   `0 <= word.head < len(words)` и `near(words, index, word.head)`: на дальних
+   дугах и через запятую разбор ошибается чаще, чем автор (замер — в докстринге
+   `MAX_ARC`). Ошибку в омонимичной форме не утверждай: для этого есть
+   `can_agree` и `can_take`.
 3. Варианты замены получай через `inflect(...)` — она же сохранит регистр. Если
    вариантов нет, замечание не выпускай: подчёркивание без предложения бесполезно.
 4. Заполни `message` человеческим объяснением: «что не так и с чем не

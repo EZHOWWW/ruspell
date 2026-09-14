@@ -39,7 +39,7 @@ from pathlib import Path
 
 from pymorphy3 import MorphAnalyzer
 
-from ruspell.issues import WORD_RE
+from ruspell.issues import CYRILLIC_WORD, WORD_RE, normalize_word
 
 MIN_DOCUMENTS = 3
 MIN_LENGTH = 3
@@ -47,9 +47,10 @@ PERSONAL_NAME_TAGS = frozenset({"Surn", "Name", "Patr"})
 
 
 def document_words(path: Path) -> set[str]:
-    """Возвращает множество слов одного документа в нижнем регистре."""
+    """Возвращает кириллические слова документа в том виде, в каком их сравнивает проверка."""
     text = path.read_text(encoding="utf-8", errors="replace")
-    return {match.group().lower() for match in WORD_RE.finditer(text)}
+    words = (normalize_word(match.group()) for match in WORD_RE.finditer(text))
+    return {word for word in words if CYRILLIC_WORD.fullmatch(word)}
 
 
 def build(corpus: Path, analyzer: MorphAnalyzer) -> list[str]:
