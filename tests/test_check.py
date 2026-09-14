@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from ruspell.check import build_layers, check_text
 from ruspell.dictionary import get_morph_analyzer
 from ruspell.issues import WORD_RE, Detector
@@ -81,3 +83,12 @@ class TestBuildLayers:
         assert [issue.word for issue in check_text("Направляем предложния.", layers)] == [
             "предложния",
         ]
+
+    def test_agreement_degrades_without_extra(self, tmp_path, monkeypatch, caplog):
+        # None в sys.modules заставляет ``import razdel`` бросить ImportError,
+        # как в окружении без экстры. razdel импортируется раньше проверки
+        # весов, поэтому их отсутствие ветку не подменяет.
+        monkeypatch.setitem(sys.modules, "razdel", None)
+        layers = build_layers(frozenset(), tmp_path / "absent", get_morph_analyzer())
+        assert tuple(layers) == ("dictionary",)
+        assert "agreement" in caplog.text

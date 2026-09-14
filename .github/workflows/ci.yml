@@ -41,7 +41,9 @@ jobs:
           enable-cache: true
       # Веса (58 МБ) в CI не качаются: юнит-тесты от них не зависят, а
       # интеграционные проверки согласования сами пропускаются без весов.
-      - run: uv run --python ${{ matrix.python-version }} pytest -q
+      # Группы сняты намеренно: dev тянет экстру agreement, а матрица проверяет,
+      # что библиотека работает без slovnet. Из групп нужен только pytest.
+      - run: uv run --python ${{ matrix.python-version }} --no-default-groups --group test pytest -q
 
   degradation:
     # Пакеты слоя согласования установлены, весов нет: проверка обязана молча

@@ -43,8 +43,13 @@ Source = "https://github.com/EZHOWWW/ruspell"
 Issues = "https://github.com/EZHOWWW/ruspell/issues"
 
 [dependency-groups]
+test = ["pytest>=8.0.0"]
 dev = [
-    "pytest>=8.0.0",
+    # agreement — экстра, а не группа, и `--all-groups` сам её не видит. Ссылка на
+    # проект с экстрой нужна, чтобы `uv sync` и `--all-groups` ставили слой
+    # согласования. На колесо не влияет: группы в метаданные пакета не попадают.
+    "ruspell[agreement]",
+    { include-group = "test" },
     "ruff>=0.9.0",
     "pyright>=1.1.390",
 ]
