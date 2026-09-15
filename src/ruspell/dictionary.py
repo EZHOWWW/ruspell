@@ -5,8 +5,11 @@
 слово; варианты упорядочиваются по частоте употребления, потому что
 ``SpellChecker.correct`` применяет именно первый вариант.
 
-Перед выдачей замечание сверяется с доменной лексикой: слова словаря
-пользователя — не ошибки, а обычные слова его текстов.
+Доменная лексика сверяется до перебора правок: слова пользователя не ошибки,
+а обычные слова его текстов. В варианты замены она не идёт. Словарь обычно
+содержит одну форму термина («энергоаудит»), и склонённая форма в одной правке
+от неё («энергоаудита») подчёркивалась бы как опечатка, а ``correct`` писал бы
+«о проведении энергоаудит».
 
 Частотный словарь — внешний файл; без него слой работает на эвристике по форме
 слова, теряя в ранжировании, но не в способности находить ошибки.
@@ -23,7 +26,6 @@ from pymorphy3 import MorphAnalyzer
 
 from ruspell.issues import Detector, find_dictionary_issues
 from ruspell.models import Issue
-from ruspell.vocabulary import drop_vocabulary_words
 
 logger = logging.getLogger("ruspell")
 
@@ -95,7 +97,13 @@ def frequency_ranker(path: Path) -> Ranker | None:
     """Возвращает частотное ранжирование вариантов, если словарь доступен.
 
     Словарь — текстовый файл «слово частота» на строку. Читается один раз на
-    процесс: полтора миллиона строк и около 150 МБ в памяти.
+    процесс: полтора миллиона строк и около 210 МБ в памяти.
+
+    Редкие слова не отбрасываются, хотя порог «встречено трижды» сэкономил бы
+    120 МБ. Словарь собран по субтитрам, и деловая лексика в нём редкая:
+    «изложенного» встречено один раз, «коллизий» — два. С порогом они
+    сравнивались с отсутствующими словами по алфавиту, и на внутреннем бенче
+    писем «изооженного» исправлялось в «извоженного».
 
     Args:
         path: Путь к частотному словарю.
@@ -106,8 +114,21 @@ def frequency_ranker(path: Path) -> Ranker | None:
     """
     if not path.exists():
         return None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # Файл есть, но прочитать его нельзя: нет прав (образ собран под root, а
+        # запущен под пользователем), каталог вместо файла, обрыв посреди
+        # многобайтного символа. Словарь нужен только для ранжирования —
+        # проверка не должна из-за него падать на сборке.
+        logger.warning(
+            "Частотный словарь %s не прочитан (%s); варианты ранжируются эвристикой по форме слова",
+            path,
+            exc,
+        )
+        return None
     frequencies: dict[str, int] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in content.splitlines():
         word, _, count = line.partition(" ")
         if word and count.isdigit():
             frequencies[word] = int(count)
@@ -141,12 +162,15 @@ def build_layer(
     Returns:
         Слой проверки.
     """
-    is_known: Callable[[str], bool] = analyzer.word_is_known
+
+    def is_known(word: str) -> bool:
+        return word in vocabulary or analyzer.word_is_known(word)
 
     def suggest(word: str) -> list[str]:
-        return rank(word, {candidate for candidate in edits1(word) if is_known(candidate)})
+        candidates = {candidate for candidate in edits1(word) if analyzer.word_is_known(candidate)}
+        return rank(word, candidates)
 
     def detect(text: str) -> list[Issue]:
-        return drop_vocabulary_words(find_dictionary_issues(text, is_known, suggest), vocabulary)
+        return find_dictionary_issues(text, is_known, suggest)
 
     return detect

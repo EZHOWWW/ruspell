@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import unicodedata
+
 from ruspell.issues import (
+    MAX_LENGTH,
     apply_issues,
     collapse_repeats,
     find_dictionary_issues,
@@ -57,6 +60,39 @@ class TestFindDictionaryIssues:
 
     def test_short_words_and_acronyms_are_skipped(self):
         assert find_dictionary_issues("ФТП про ннн", is_known, suggest) == []
+
+    def test_overlong_word_never_reaches_suggest(self):
+        # Перебор правок на слове в 5000 букв съедает гигабайты: такое «слово»
+        # не проверяется вовсе, а не проверяется долго.
+        def explode(word: str) -> list[str]:
+            raise AssertionError(f"suggest вызван на слове длиной {len(word)}")
+
+        assert find_dictionary_issues("а" * (MAX_LENGTH + 1), is_known, explode) == []
+
+    def test_first_part_of_hyphenated_compound_is_skipped(self):
+        # Соединительная гласная делает «технико» несловарным по построению, а
+        # correct писал «техника-экономическое».
+        issues = find_dictionary_issues("технико-экономическое", is_known, lambda word: ["техника"])
+        assert [i.word for i in issues] == ["экономическое"]
+
+    def test_second_part_of_hyphenated_compound_is_checked(self):
+        issues = find_dictionary_issues("пуско-предложния", is_known, suggest)
+        assert [i.word for i in issues] == ["предложния"]
+
+    def test_decomposed_letters_are_read_as_one_word(self):
+        # «й» и «ё» из PDF и macOS приходят как «и» + U+0306 и «е» + U+0308.
+        text = unicodedata.normalize("NFD", "новый ещё")
+        assert find_dictionary_issues(text, {"новый"}.__contains__, lambda word: ["новы"]) == []
+
+    def test_soft_hyphen_does_not_split_the_word(self):
+        text = "пред\u00adложния"
+        issues = find_dictionary_issues(text, is_known, suggest)
+        assert [(i.word, i.suggestions) for i in issues] == [(text, ("предложения",))]
+
+    def test_word_with_latin_letters_is_skipped(self):
+        # Латинская «е» резала слово на обрывки, и обрывок «дложния» подчёркивался:
+        # вариант для него находится всегда, поэтому suggest здесь щедрый.
+        assert find_dictionary_issues("прeдложния", is_known, lambda word: ["вложения"]) == []
 
     def test_every_occurrence_is_reported(self):
         issues = find_dictionary_issues("предложния и предложния", is_known, suggest)

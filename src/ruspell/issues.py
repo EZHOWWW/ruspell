@@ -8,21 +8,40 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import replace
 
 from ruspell.models import Issue
 
-WORD_RE = re.compile(r"[А-Яа-яЁё]+", re.UNICODE)
-"""Слово — это последовательность кириллических букв.
+WORD_RE = re.compile(r"[^\W\d_](?:[^\W\d_]|[\u0300-\u036f\u00ad\u200b-\u200d\u2060])*")
+"""Слово — буквы любого алфавита подряд вместе с невидимыми символами внутри.
 
-Латиница, цифры и знаки словами не считаются: проверять их нечем, а флагов на
-них было бы больше, чем пользы.
+Проверяются из них только кириллические (``CYRILLIC_WORD``): латиницу, цифры и
+знаки проверять нечем, а флагов на них было бы больше, чем пользы. Но резать
+текст на слова нужно по буквам любого алфавита и с невидимыми символами:
+латинская «е» внутри кириллического слова, мягкий перенос U+00AD из HTML и
+Word, «й» в разложенной форме (U+0306) из PDF иначе разрезали бы слово на
+обрывки. Обрывок подчёркивался, а ``correct`` вставлял исправление в середину
+слова: «пред\xadложение» → «пред\xadвложение».
 """
+
+CYRILLIC_WORD = re.compile(r"[а-яё]+")
+
+IGNORED_MARKS = dict.fromkeys(map(ord, "\u00ad\u200b\u200c\u200d\u2060\u0300\u0301"))
+"""Мягкий перенос, символы нулевой ширины и знаки ударения: в написании слова их нет."""
 
 MIN_LENGTH = 4
 """Короткие слова не проверяются: на трёх буквах вариантов замены больше, чем
 слов в языке, и почти все они мимо."""
+
+MAX_LENGTH = 40
+"""Длинные слова не проверяются: в языке таких нет, а перебор правок взрывается.
+
+``edits1`` порождает около 66 вариантов на букву, каждый длиной в слово: на 1000
+букв это +60 МБ и полсекунды, на 5000 — больше 3 ГБ и OOM-kill процесса. Такое
+«слово» — склейка из PDF, base64 в кириллице или мусор, а самые длинные слова
+словарей короче 40 букв."""
 
 MAX_SUGGESTIONS = 5
 """Больше пяти вариантов человек всё равно не читает."""
@@ -42,8 +61,27 @@ INITIALS_WINDOW = 8
 «Фамилия И.О.» и «И.О. Фамилии».
 """
 
+COMPOUND_HEAD = re.compile(r"[-\u2010\u2011][А-Яа-яЁё]")
+"""Дефис и буква сразу за словом: это первая часть составного слова.
+
+Её не проверяем. У первой части соединительная гласная — «технико-»,
+«пуско-», «медико-», «северо-», — отдельным словом её нет в словаре по
+построению, а в одной правке от неё всегда есть настоящее слово. Проверка
+подчёркивала каждое такое слово, а ``correct`` писал «техника-экономическое».
+Вторая часть — обычное слово и проверяется как обычно.
+"""
+
 Detector = Callable[[str], list[Issue]]
 """Слой проверки: из текста строки — список замечаний со спанами в ней."""
+
+
+def normalize_word(word: str) -> str:
+    """Приводит слово к виду словаря: без невидимых символов и ударений, в NFC, строчными.
+
+    Для словаря «нови\u0306» и «новый» — разные слова, а для читателя одно.
+    Знаки убираются до NFC: иначе «и» с ударением собралось бы в отдельную букву.
+    """
+    return unicodedata.normalize("NFC", word.translate(IGNORED_MARKS)).lower()
 
 
 def near_initials(text: str, start: int, end: int) -> bool:
@@ -76,10 +114,14 @@ def find_dictionary_issues(
     issues: list[Issue] = []
     for match in WORD_RE.finditer(text):
         word = match.group()
-        lowered = word.lower()
-        if len(word) < MIN_LENGTH or word.isupper() or is_known(lowered):
+        lowered = normalize_word(word)
+        if not CYRILLIC_WORD.fullmatch(lowered) or not MIN_LENGTH <= len(lowered) <= MAX_LENGTH:
+            continue
+        if word.isupper() or is_known(lowered):
             continue
         if near_initials(text, match.start(), match.end()):
+            continue
+        if COMPOUND_HEAD.match(text, match.end()):
             continue
         suggestions = suggest(lowered)[:MAX_SUGGESTIONS]
         if not suggestions:

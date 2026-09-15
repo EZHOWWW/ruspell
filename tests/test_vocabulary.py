@@ -1,4 +1,4 @@
-"""Тесты доменного словаря: сборка из фраз, чтение из файла, фильтрация."""
+"""Тесты доменного словаря: сборка из фраз и чтение из файла."""
 
 from __future__ import annotations
 
@@ -6,17 +6,7 @@ import json
 
 import pytest
 
-from ruspell.models import Issue
-from ruspell.vocabulary import (
-    drop_vocabulary_words,
-    in_vocabulary,
-    load_vocabulary,
-    vocabulary_words,
-)
-
-
-def issue(word: str) -> Issue:
-    return Issue(word=word, start=0, end=len(word), category="SPELL", suggestions=("другое",))
+from ruspell.vocabulary import load_vocabulary, vocabulary_words
 
 
 class TestVocabularyWords:
@@ -37,6 +27,9 @@ class TestVocabularyWords:
         # Так же режется и текст, поэтому «машино-мест» в письме совпадёт со
         # словарём по обеим половинам — отдельного разбора дефиса не нужно.
         assert vocabulary_words(["машино-мест"]) == frozenset({"машино", "мест"})
+
+    def test_words_are_normalized_like_the_text(self):
+        assert vocabulary_words(["Гос\u00adэкспертиза"]) == frozenset({"госэкспертиза"})
 
     def test_a_bare_string_is_rejected(self):
         # Строка — тоже Iterable[str], и без проверки словарь молча стал бы
@@ -61,32 +54,3 @@ class TestLoadVocabulary:
         path.write_text(json.dumps({"слова": ["фтп"]}), encoding="utf-8")
         with pytest.raises(ValueError, match="список строк"):
             load_vocabulary(path)
-
-
-class TestInVocabulary:
-    def test_known_word_is_domain(self):
-        assert in_vocabulary("Фондтехпроект", frozenset({"фондтехпроект"}))
-
-    def test_word_is_matched_case_insensitively(self):
-        assert in_vocabulary("  ОКВЭД  ", frozenset({"оквэд"}))
-
-    def test_unknown_word_is_not_domain(self):
-        assert not in_vocabulary("предложния", frozenset({"техрегламент"}))
-
-    def test_empty_word_is_not_domain(self):
-        assert not in_vocabulary("   ", frozenset({"техрегламент"}))
-
-
-class TestDropVocabularyWords:
-    def test_domain_word_is_dropped(self):
-        assert drop_vocabulary_words([issue("Фондтехпроект")], frozenset({"фондтехпроект"})) == []
-
-    def test_expansion_word_is_no_longer_flagged(self):
-        vocabulary = vocabulary_words(["ФТП", "Фондтехпроект"])
-        assert drop_vocabulary_words([issue("Фондтехпроект")], vocabulary) == []
-
-    def test_real_error_survives(self):
-        assert len(drop_vocabulary_words([issue("предложния")], frozenset({"фтп"}))) == 1
-
-    def test_empty_vocabulary_drops_nothing(self):
-        assert len(drop_vocabulary_words([issue("Фондтехпроект")], frozenset())) == 1
